@@ -17,7 +17,8 @@ tools = [{"type": "function", "function": record_user_details_json},
         {"type": "function", "function": record_unknown_question_json}]
 
 
-summary = read_pdf("./summary.pdf")
+
+summary = read_pdf("../summary.pdf")
 name = "Rohit"
 
 def generate_system_prompt(): 
