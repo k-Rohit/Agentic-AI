@@ -1,17 +1,16 @@
 
-from dotenv import load_dotenv
 from openai import OpenAI
 import os
 import json
 from utils import read_pdf
-import gradio as gr
+import streamlit as st
 from tools import *
 
-load_dotenv()
-openai = OpenAI(api_key=os.getenv("OPENAI_API_KEY"))
+# Initialize OpenAI client using Streamlit secrets
+openai = OpenAI(api_key=st.secrets["OPENAI_API_KEY"])
 
-PUSHOVER_USER = os.getenv("PUSHOVER_USER")
-PUSHOVER_TOKEN = os.getenv("PUSHOVER_TOKEN")
+PUSHOVER_USER = st.secrets["PUSHOVER_USER"]
+PUSHOVER_TOKEN = st.secrets["PUSHOVER_TOKEN"]
 
 
 tools = [{"type": "function", "function": record_user_details_json},
@@ -79,77 +78,103 @@ class Chatbot:
 
 chatbot = Chatbot(openai, tools)
 
-# ---- Gradio UI (Blocks) ----
-examples = [
-    "What kinds of projects has Rohit worked on?",
-    "What is Rohit's current role and expertise?",
-    "Can Rohit help with an AI/LLM project?",
-]
-
-def on_send(user_message, chat_display, oa_messages):
-    """Handle send: call model, update visible chat and internal OA messages state."""
-    user_message = (user_message or "").strip()
-    if not user_message:
-        return "", chat_display, oa_messages
-    assistant_reply = chatbot.chat(user_message, oa_messages)
-    new_chat_display = (chat_display or []) + [(user_message, assistant_reply)]
-    new_oa_messages = (oa_messages or []) + [
-        {"role": "user", "content": user_message},
-        {"role": "assistant", "content": assistant_reply},
+# ---- Streamlit UI ----
+def main():
+    st.set_page_config(page_title=f"Chat with {name}", page_icon="🤖", layout="wide")
+    
+    st.markdown(f"# 🤖 Chat with {name}")
+    st.markdown("Ask about background, skills, and experience.")
+    
+    # Initialize session state
+    if "messages" not in st.session_state:
+        st.session_state.messages = []
+    if "oa_messages" not in st.session_state:
+        st.session_state.oa_messages = []
+    
+    # Display chat messages
+    for message in st.session_state.messages:
+        with st.chat_message(message["role"]):
+            st.markdown(message["content"])
+    
+    # Example questions
+    examples = [
+        "What kinds of projects has Rohit worked on?",
+        "What is Rohit's current role and expertise?",
+        "Can Rohit help with an AI/LLM project?",
     ]
-    return "", new_chat_display, new_oa_messages
+    
+    st.markdown("### Try one of these:")
+    cols = st.columns(len(examples))
+    for i, example in enumerate(examples):
+        with cols[i]:
+            if st.button(example, key=f"example_{i}"):
+                st.session_state.user_input = example
+    
+    # Chat input
+    if prompt := st.chat_input("Type your question and press Enter…"):
+        # Add user message to chat history
+        st.session_state.messages.append({"role": "user", "content": prompt})
+        st.session_state.oa_messages.append({"role": "user", "content": prompt})
+        
 
-def on_example_click(example_text):
-    return example_text
+        with st.chat_message("user"):
+            st.markdown(prompt)
+        
+        with st.chat_message("assistant"):
+            with st.spinner("Thinking..."):
+                response = chatbot.chat(prompt, st.session_state.oa_messages)
+            st.markdown(response)
+        
+        st.session_state.messages.append({"role": "assistant", "content": response})
+        st.session_state.oa_messages.append({"role": "assistant", "content": response})
+    
+    if hasattr(st.session_state, 'user_input'):
+        prompt = st.session_state.user_input
+        delattr(st.session_state, 'user_input')
+        
+        # Add user message to chat history
+        st.session_state.messages.append({"role": "user", "content": prompt})
+        st.session_state.oa_messages.append({"role": "user", "content": prompt})
+        
+        # Display user message
+        with st.chat_message("user"):
+            st.markdown(prompt)
+        
+        # Get assistant response
+        with st.chat_message("assistant"):
+            with st.spinner("Thinking..."):
+                response = chatbot.chat(prompt, st.session_state.oa_messages)
+            st.markdown(response)
+        
+        # Add assistant response to chat history
+        st.session_state.messages.append({"role": "assistant", "content": response})
+        st.session_state.oa_messages.append({"role": "assistant", "content": response})
+        st.rerun()
+    
+    # Contact form
+    with st.expander("Get in touch", expanded=False):
+        with st.form("contact_form"):
+            user_name = st.text_input("Your name", placeholder="Jane Doe")
+            email = st.text_input("Email", placeholder="jane@example.com")
+            notes = st.text_area("Notes (optional)", placeholder="Tell me a bit about your needs…")
+            
+            if st.form_submit_button("Send contact details"):
+                try:
+                    record_user_details(
+                        email=email.strip() if email else "",
+                        name=user_name.strip() if user_name else "not provided",
+                        notes=notes.strip() if notes else "not_provided",
+                    )
+                    confirmation = "Thanks! I've recorded your details and will be in touch via email."
+                    st.success(confirmation)
+                except Exception:
+                    confirmation = "Sorry, I couldn't record your details right now. Please try again later."
+                    st.error(confirmation)
+                
+                # Add confirmation to chat
+                st.session_state.messages.append({"role": "assistant", "content": confirmation})
+                st.session_state.oa_messages.append({"role": "assistant", "content": confirmation})
+                st.rerun()
 
-def on_contact_submit(name, email, notes, chat_display, oa_messages):
-    """Submit contact info via existing tool and post a confirmation in chat."""
-    confirmation = ""
-    try:
-        record_user_details(
-            email=(email or "").strip(),
-            name=(name or "not provided").strip(),
-            notes=(notes or "not_provided").strip(),
-        )
-        confirmation = "Thanks! I’ve recorded your details and will be in touch via email."
-    except Exception:
-        confirmation = "Sorry, I couldn’t record your details right now. Please try again later."
-    new_chat_display = (chat_display or []) + [(None, confirmation)]
-    new_oa_messages = (oa_messages or []) + [{"role": "assistant", "content": confirmation}]
-    return "", "", "", new_chat_display, new_oa_messages
-
-with gr.Blocks(title=f"Chat with {name}") as demo:
-    gr.Markdown(f"# Chat with {name}\nAsk about background, skills, and experience.")
-
-    oa_messages = gr.State([])  # keeps OpenAI-style message history
-
-    chatbot_ui = gr.Chatbot(height=420, show_copy_button=True, type="tuples")
-
-    with gr.Row():
-        user_input = gr.Textbox(label="Message", placeholder="Type your question and press Enter…", scale=8)
-        send_btn = gr.Button("Send", variant="primary", scale=1)
-
-    gr.Examples(
-        examples=examples,
-        inputs=[user_input],
-        examples_per_page=6,
-        label="Try one of these",
-    )
-
-    with gr.Accordion("Get in touch", open=False):
-        with gr.Row():
-            name_tb = gr.Textbox(label="Your name", placeholder="Jane Doe")
-            email_tb = gr.Textbox(label="Email", placeholder="jane@example.com")
-        notes_tb = gr.Textbox(label="Notes (optional)", placeholder="Tell me a bit about your needs…")
-        submit_contact = gr.Button("Send contact details")
-
-    # Wiring events
-    user_input.submit(on_send, inputs=[user_input, chatbot_ui, oa_messages], outputs=[user_input, chatbot_ui, oa_messages])
-    send_btn.click(on_send, inputs=[user_input, chatbot_ui, oa_messages], outputs=[user_input, chatbot_ui, oa_messages])
-    submit_contact.click(
-        on_contact_submit,
-        inputs=[name_tb, email_tb, notes_tb, chatbot_ui, oa_messages],
-        outputs=[name_tb, email_tb, notes_tb, chatbot_ui, oa_messages],
-    )
-
-demo.launch()
+if __name__ == "__main__":
+    main()

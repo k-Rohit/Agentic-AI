@@ -1,12 +1,13 @@
 import os
 import requests
+import streamlit as st
 from PyPDF2 import PdfReader
 def push(text):
          requests.post(
         "https://api.pushover.net/1/messages.json",
         data={
-            "token": os.getenv("PUSHOVER_TOKEN"),
-            "user": os.getenv("PUSHOVER_USER"),
+            "token": st.secrets["PUSHOVER_TOKEN"],
+            "user": st.secrets["PUSHOVER_USER"],
             "message": text,
         }
     )
